@@ -16,9 +16,12 @@ def getEchoData():
     else:
         return jsonify({"message": "Echo Data not saved."})
 
-@app.route('/api/submit', methods=['POST'])
-def submit_data():
-    data = request.get_json()
+
+@app.route('/api/calRes', methods=['POST'])
+def calRes():
+try:
+    data = request.json()
+    console.log("here am i:", data)
     print("Received data:", data)
     return jsonify({"status": "success", "received_data": data})
 
