@@ -1,8 +1,7 @@
-import React from "react";
-import { useState, useEffect } from 'react';
+import React, {FormEvent} from "react";
+import { useState } from 'react';
 import { Button, Form,  Select, Input } from 'antd';
 import { Breadcrumb, Layout, Menu, theme } from 'antd';
-
 
 const { Header, Content, Footer } = Layout;
 
@@ -37,6 +36,13 @@ const items = [
 type FieldType = {
     fc?: number;
     fs?: number;
+    theta?: number;
+    Tp?: number;
+    B?: number;
+    fdop?: number;
+    PRF?: number;
+    Vg?: number;
+    R0?: number;
 };
 
 const App: React.FC = () => {
@@ -45,19 +51,36 @@ const App: React.FC = () => {
     } = theme.useToken();
 
     const [RadarForm] = Form.useForm();
-    // const [loading, setLoading] = useState(false);
+    const [aziRes,setAziRes] = useState<number>(0);
+    const [rangeRes,setRangeRes] = useState<number>(0);
 
 
-    const [response, setResponse] = useState('');
+    const [imageData, setImageData] = useState(false);
+
     const getEchoRes = async () => {
+        const params = RadarForm.getFieldsValue();
         try {
-            const res = await fetch('http://localhost:5000/api/echoGen');
+            const res = await fetch('http://localhost:5000/api/echoGen', {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(params)
+            });
+            if (!res.ok) {
+                throw new Error(`HTTP error! Status: ${res.status}`);
+            }
             const data = await res.json();
-            setResponse(data.message);
-        } catch (error) {
-            console.error('Error:', error);
+            console.log(data);
+            setImageData(true);
+        }
+        catch (error) {
+            console.error(error);
         }
     };
+
+    const onFinish = async (e: FormEvent) => {
+         console.log(111);
+         console.log(e);
+    }
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
@@ -95,7 +118,7 @@ const App: React.FC = () => {
                                 style={{flex:1, padding:"10px", textAlign:"left", paddingBottom:"20px"}}
                             >
                                 <text
-                                    style={{fontSize:"medium"}}
+                                    style={{fontSize:"large"}}
                                 >
                                     雷达参数
                                 </text>
@@ -106,48 +129,51 @@ const App: React.FC = () => {
                                 name="RadarForm"
                                 labelCol={{ span: 8 }}
                                 wrapperCol={{ span: 16 }}
-                                style={{ maxWidth: 600 }}
+                                style={{ maxWidth: 600}}
                                 initialValues={{ remember: true }}
-                                // onFinish={onFinish}
+                                onFinish={onFinish}
                                 // onFinishFailed={onFinishFailed}
                                 autoComplete="off"
                                 onFieldsChange ={
-                                    (changedFields: any[], allFields: any[]) => {
-                                        setTimeout(() => {
+                                    (changedFields, allFields) => {
                                             const tgValues = ["fdop", "B", "Vg"];
-
-                                            const updatedValues: Record<string, any> = {};
-                                            changedFields.forEach(field => {
+                                            for (const field of changedFields) {
                                                 if (tgValues.includes(field.name?.[0])) {
-                                                    updatedValues[field.name[0]] = field.value;
-                                                }
-                                            });
+                                                    const currB = changedFields.find(field => field.name?.[0] === "B") || allFields.find(field => field.name?.[0] === "B") || { value : -1};
+                                                    const currFdop = changedFields.find(field => field.name?.[0] === "fdop")||allFields.find(field => field.name?.[0] === "fdop") || { value : -1};
+                                                    const currVg = changedFields.find(field => field.name?.[0] === "Vg")|| allFields.find(field => field.name?.[0] === "Vg") || { value : -1};
 
-                                            if (Object.keys(updatedValues).length > 0) {
-                                                const calres = async(updatedValues: Record<string, any>) => {
-                                                    try {
-                                                        const response = await fetch("http://localhost:5000/calRes", {
-                                                            method: "POST",
-                                                            headers: {
-                                                                "Content-Type": "application/json",
-                                                            },
-                                                            body: JSON.stringify(updatedValues),
-                                                        });
-                                                        const result = await response.json();
-                                                        console.log("Backend Response:", result);
-                                                    } catch (error) {
-                                                        console.error("Error sending data to backend:", error);
-                                                    }
+                                                    const resParams = { B:currB.value, fdop:currFdop.value, Vg:currVg.value};
+
+                                                    (async () => {
+                                                        try {
+                                                            const res = await fetch('http://localhost:5000/api/calRes', {
+                                                                method: "POST",
+                                                                headers: {"Content-Type": "application/json"},
+                                                                body: JSON.stringify(resParams)
+                                                            });
+                                                            if (!res.ok) {
+                                                                throw new Error(`HTTP error! Status: ${res.status}`);
+                                                            }
+                                                            const data = await res.json();
+                                                            console.log(data);
+                                                            setAziRes(data["aziRes"])
+                                                            setRangeRes(data["rangeRes"])
+                                                        }
+                                                        catch (error) {
+                                                            console.error(error);
+                                                        }
+                                                    })();
+                                                    break; // 终止循环
                                                 }
                                             }
-                                        }, 500)
                                     }
                                 }
                             >
                                 <Form.Item
                                     label="导入电磁建模"
                                     name="eleModel"
-                                    rules={[{required: true, message: "can not be empty!"}]}
+                                    // rules={[{required: true, message: "can not be empty!"}]}
                                 >
                                     <Select
                                         options={[
@@ -159,7 +185,15 @@ const App: React.FC = () => {
 
                                 <Form.Item<FieldType>
                                     label="中心频率fc"
-                                    name="username"
+                                    name="fc"
+                                    rules={[{ required: true, message: 'Please input your fc!' }]}
+                                >
+                                    <Input />
+                                </Form.Item>
+
+                                <Form.Item<FieldType>
+                                    label="下视角theta(deg)"
+                                    name="theta"
                                     rules={[{ required: true, message: 'Please input your fc!' }]}
                                 >
                                     <Input />
@@ -201,6 +235,7 @@ const App: React.FC = () => {
                                     label="脉冲重频PRF"
                                     name="PRF"
                                     rules={[{ required: true, message: 'Please input your PRF!' }]}
+                                    style={{fontSize:"medium"}}
                                 >
                                     <Input />
                                 </Form.Item>
@@ -212,6 +247,21 @@ const App: React.FC = () => {
                                 >
                                     <Input />
                                 </Form.Item>
+
+                                <Form.Item<FieldType>
+                                    label="中心斜距R0"
+                                    name="R0"
+                                    rules={[{ required: true, message: 'Please input your Vg!' }]}
+                                >
+                                    <Input />
+                                </Form.Item>
+
+                                <div
+                                    style={{ display: "flex", justifyContent: "space-evenly" }}
+                                >
+                                    <p style={{fontSize:"medium"}}>理论方位向分辨率(m)：{aziRes}</p>
+                                    <p style={{fontSize:"medium"}}>理论距离向分辨率(m)：{rangeRes}</p>
+                                </div>
 
                                 {/*<Form.Item<FieldType> name="remember" valuePropName="checked" label={null}>*/}
                                 {/*    <Checkbox>Remember me</Checkbox>*/}
@@ -238,7 +288,22 @@ const App: React.FC = () => {
                         <div
                             style={{flex: 1, background: "lightcoral", padding: "10px"}}
                         >
-                            右侧内容
+                            <div
+                                style={{flex: 1, padding: "10px", textAlign: "left", paddingBottom: "20px"}}
+                            >
+                                <text
+                                    style={{fontSize: "large"}}
+                                >
+                                    回波图像
+                                </text>
+                                {imageData && (
+                                    <div>
+                                        {/*<img src={`data:image/png;base64,${imageData}`} alt="SAR Image"/>*/}
+                                        <img src="http://localhost:5000/pltResult/plot.png" alt="Matplotlib Plot"/>
+                                    </div>
+                                )}
+                            </div>
+
                         </div>
                     </div>
                 </div>
