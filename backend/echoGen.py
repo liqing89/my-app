@@ -4,6 +4,9 @@ import os
 import scipy.io as sio
 from numpy.fft import fft, ifft
 import multiprocessing
+import cupy as cp
+
+import time
 
 def AirboneEchoGen(tags, params, delta_h=0):
 
@@ -125,58 +128,62 @@ def AirboneEchoGen(tags, params, delta_h=0):
     rcsVec = data[:, 3].T * np.exp(1j * (2 * np.pi * np.random.randn(1, N) - np.pi))
     constExp = -1j*4*np.pi/lamda
 
-    echoData = np.zeros((int(sampleNum), int(Nr)), dtype=complex)
+    echoData = cp.zeros((int(sampleNum), int(Nr)), dtype=complex)
 
     for i in range(sampleNum):
-        rngLine = np.zeros(int(riseNr),dtype=complex)
-        sat2ptAll = ptPos - satTrack[:, i].reshape(-1, 1)
-        Rk_all = np.linalg.norm(sat2ptAll, axis=0)
+        rngLine = cp.zeros(int(riseNr), dtype=complex)
+        sat2ptAll = cp.array(ptPos) - cp.array(satTrack[:, i]).reshape(-1, 1)
+        Rk_all = cp.linalg.norm(sat2ptAll, axis=0)
 
-        # squiAngOff_all = np.zeros(N)
-        # for k in range(N):
-        #     squiAngOff_all[k] = np.arccos(np.dot(sat2ptAll[:, k], beamDir[:, i]) / np.linalg.norm(sat2ptAll[:, k]) / np.linalg.norm(beamDir[:, i]))
-        dot_vals = np.sum(sat2ptAll * beamDir[:, i].reshape(-1, 1), axis=0)
-        norms = np.linalg.norm(sat2ptAll, axis=0)
-        beam_norm = np.linalg.norm(beamDir[:, i])
-        squiAngOff_all = np.arccos(dot_vals / (norms * beam_norm))
+        squiAngOff_all = cp.zeros(N)
+        for k in range(N):
+            beamDir_cp = cp.array(beamDir)
+            numerator = cp.dot(sat2ptAll[:, k], beamDir_cp[:, i])
+            denominator = cp.linalg.norm(sat2ptAll[:, k]) * cp.linalg.norm(beamDir[:, i])
+            squiAngOff_all[k] = cp.arccos(numerator / denominator)
 
-        valid_range_idx = np.round((Rk_all - rngStart) / rngInterv).astype(int)
-        valid_range_idx = np.clip(valid_range_idx, 0, len(rngLine) - 1)
+        valid_range_idx = cp.round((Rk_all - rngStart) / rngInterv).astype(cp.int32)
+        valid_range_idx = cp.clip(valid_range_idx, 0, len(rngLine) - 1)
         valid_range = (valid_range_idx >= 0) & (valid_range_idx < riseNr)
-        valid_angle = np.abs(squiAngOff_all) <= theta_bw / 2
+        valid_angle = cp.abs(squiAngOff_all) <= theta_bw / 2
         valid_points = valid_range & valid_angle
 
-        for k in np.where(valid_points)[0]:
-            rngIdx = int(valid_range_idx[k])
+        valid_indices = cp.where(valid_points)[0]
+        for k in valid_indices.get():
+            rngIdx = int(valid_range_idx[k].item())
             if antennaMode == 1:
                 A = 1
             else:
-                A = np.sinc(squiAngOff_all[k] / theta_bw) ** 2
+                A = cp.sinc(squiAngOff_all[k] / theta_bw) ** 2
             if 0 <= rngIdx < len(rngLine):
-                rngLine[rngIdx] += A * rcsVec[k].item() * np.exp(constExp * Rk_all[k].item())
+                rngLine[rngIdx] += A * rcsVec[k].item() * cp.exp(constExp * Rk_all[k].item())
             else:
                 print(f"Invalid index {rngIdx}, skipping this iteration.")
 
-        rngLine = np.fft.ifft(np.fft.fft(rngLine) * sigFFT)
+        rngLine = cp.fft.ifft(cp.fft.fft(rngLine) * cp.asarray(sigFFT))
         echoData[i, :] = rngLine[::riseRatio]
+
+    echodata = cp.asnumpy(echoData)
 
     # 保存结果
     if saveFlag == 1:
-        sio.savemat(saveEchoPath, {'data': echoData, 'satTrack': satTrack, 'c': c, 'fc': fc, 'lamda': lamda, 'fs': fs, 'Tp': Tp, 'Kr': Kr, 'B': B, 'PRF': PRF, 'V': V, 'delta_h': delta_h, 'offNadiAng': offNadiAng})
+        sio.savemat(saveEchoPath, {'data': echodata, 'satTrack': satTrack, 'c': c, 'fc': fc, 'lamda': lamda, 'fs': fs, 'Tp': Tp, 'Kr': Kr, 'B': B, 'PRF': PRF, 'V': V, 'delta_h': delta_h, 'offNadiAng': offNadiAng})
 
     output_folder = './pltResult'
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
-    plt.imshow(np.abs(echoData), aspect='auto')
+    plt.imshow(np.abs(echodata), aspect='auto')
     plt.title('Orinial Echo')
     plt.show()
     plt.savefig(f"{output_folder}/plot.png", format="png")
-    plt.close() # 关闭当前图像以释放内存
+    # plt.close() # 关闭当前图像以释放内存
 
     return 1
 
 if __name__ == "__main__":
+    start_time = time.time()
+
     tags = {
         'date':'0306',
         'model':'TEST',
@@ -197,3 +204,5 @@ if __name__ == "__main__":
         'PRF': 40
     }
     AirboneEchoGen(tags,params)
+    end_time = time.time()
+    print("计算用时: {:.3f} 秒".format(end_time - start_time))
